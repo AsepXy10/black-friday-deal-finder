@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DealHound shotter</title>
+<style>body{font-family:system-ui,sans-serif;margin:16px}button{padding:10px 16px;font-size:16px;margin:4px}#status{margin-top:12px;font-size:15px}iframe{border:1px solid #999;display:block;margin-top:12px}</style>
+</head>
+<body>
+<h1>DealHound shotter</h1>
+<p>Captures the app in a same-origin iframe at exact size and rasterizes the live DOM to JPEG.</p>
+<button id="all">Capture all 4</button>
+<button data-view="0">1-deals.jpg</button>
+<button data-view="1">2-deal.jpg</button>
+<button data-view="2">3-filtered.jpg</button>
+<button data-view="3">4-deals-phone.jpg</button>
+<div id="status">Ready.</div>
+<iframe id="frame" width="1280" height="800"></iframe>
+<script>
+const VIEWS = [
+  {file:'1-deals.jpg', src:'app/#/', w:1280, h:800},
+  {file:'2-deal.jpg', src:'app/#/deal/airpods-pro-3', w:1280, h:800},
+  {file:'3-filtered.jpg', src:'app/#/', w:1280, h:800, filter:'Audio'},
+  {file:'4-deals-phone.jpg', src:'app/#/', w:390, h:844}
+];
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function setStatus(t){ document.getElementById('status').textContent = t; }
+async function capture(v){
+  setStatus('Capturing ' + v.file + ' ...');
+  const css = await (await fetch('app/style.css')).text();
+  const f = document.getElementById('frame');
+  f.style.width = v.w + 'px'; f.style.height = v.h + 'px';
+  f.width = v.w; f.height = v.h;
+  f.src = v.src;
+  await new Promise(r => { f.onload = r; });
+  await sleep(1000);
+  const doc = f.contentDocument;
+  if (v.filter){
+    const sel = doc.getElementById('filter-category');
+    sel.value = v.filter;
+    sel.dispatchEvent(new Event('change', {bubbles:true}));
+    await sleep(700);
+  }
+  const clone = doc.documentElement.cloneNode(true);
+  clone.querySelectorAll('script').forEach(s => s.remove());
+  clone.querySelectorAll('link').forEach(l => l.remove());
+  const st = doc.createElement('style');
+  st.textContent = css;
+  clone.querySelector('head').appendChild(st);
+  clone.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+  const html = new XMLSerializer().serializeToString(clone);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + v.w + '" height="' + v.h + '"><foreignObject width="100%" height="100%">' + html + '</foreignObject></svg>';
+  const url = URL.createObjectURL(new Blob([svg], {type:'image/svg+xml;charset=utf-8'}));
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('svg load failed')); img.src = url; });
+  const c = document.createElement('canvas');
+  c.width = v.w; c.height = v.h;
+  c.getContext('2d').drawImage(img, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.8));
+  if (!blob) throw new Error('toBlob returned null for ' + v.file);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = v.file;
+  a.click();
+  setStatus(v.file + ' downloaded: ' + blob.size + ' bytes');
+  return blob.size;
+}
+document.getElementById('all').addEventListener('click', async () => {
+  try { for (const v of VIEWS){ await capture(v); await sleep(500); } setStatus('All 4 done.'); }
+  catch(e){ setStatus('ERROR: ' + e.message); }
+});
+document.querySelectorAll('button[data-view]').forEach(b => b.addEventListener('click', async () => {
+  try { await capture(VIEWS[+b.dataset.view]); } catch(e){ setStatus('ERROR: ' + e.message); }
+}));
+</script>
+</body>
+</html>
